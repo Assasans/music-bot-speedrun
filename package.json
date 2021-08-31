@@ -1,0 +1,24 @@
+{
+  "name": "music-bot-speedrun",
+  "version": "0.1.0",
+  "description": "",
+  "author": "Assasans",
+  "license": "MIT",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node .",
+    "start-dev": "nodemon ."
+  },
+  "dependencies": {
+    "@discordjs/opus": "^0.6.0",
+    "@discordjs/voice": "^0.6.0",
+    "discord.js": "^13.1.0",
+    "libsodium-wrappers": "^0.7.9",
+    "lodash": "^4.17.21",
+    "promise-fs": "^2.1.1"
+  },
+  "devDependencies": {
+    "@types/lodash": "^4.14.172",
+    "@types/promise-fs": "^2.1.2"
+  }
+}
