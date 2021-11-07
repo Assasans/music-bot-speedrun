@@ -14,6 +14,8 @@ const {
 	VoiceConnectionStatus
 } = require('@discordjs/voice');
 
+const Mixer = require('./mixer/mixer');
+
 function execAsync(command) {
 	return new Promise((resolve, reject) => {
 		exec(command, (error, stdout, stderr) => {
@@ -41,58 +43,91 @@ function execAsync(command) {
 		console.log(`Logged in: ${user.username}#${user.discriminator}`);
 	});
 
+	const mixer = new Mixer({ sampleRate: 48000, bitDepth: 16, channels: 2 });
+
+	const firstInput = mixer.input({ volume: 100 });
+	const secondInput = mixer.input({ volume: 100 });
+
+	const masterMix = mixer;
+
 	client.on('messageCreate', async (message) => {
-		const guild = message.guild;
-		const content = message.content;
-		const member = message.member;
+		try {
+			const guild = message.guild;
+			const content = message.content;
+			const member = message.member;
 
-		if(!member) return;
-		if(!content.startsWith('%')) return;
+			if(!member) return;
+			if(!content.startsWith('%')) return;
 
-		const rawArgs = content.slice(1).split(' ');
-		const command = rawArgs[0];
-		const args = rawArgs.slice(1);
+			const rawArgs = content.slice(1).split(' ');
+			const command = rawArgs[0];
+			const args = rawArgs.slice(1);
+			
+			if(command === 'ad') {
+				const data = await Fs.readFile(Path.resolve(args.join(' ')), { encoding: null });
 
-		if(command === 'play') {
-			const url = args[0].replace('<', '').replace('>', '');
+				firstInput.volume = 20;
+				console.log('[ad] decreased main volume');
 
-			const channel = member.voice.channel;
-			if(!channel) {
-				message.reply('You are not in a voice channel');
-				return;
+				secondInput.write(data);
+				console.log(`[ad -> mix] Written ${data.byteLength} bytes`);
+			
+				secondInput.onRead = (samples, isSilence) => {
+					// console.log(`Read: ${samples} samples`);
+					if(isSilence) {
+						secondInput.onRead = null;
+						
+						firstInput.volume = 100;
+
+						console.log('[ad] restored main volume');
+
+						// message.reply('Хуйня выключена');
+					}
+				};
+
+				// message.reply('Хуйня включена');
 			}
 
-			const connection = joinVoiceChannel({
-				guildId: guild.id,
-				channelId: channel.id,
-				adapterCreator: guild.voiceAdapterCreator
-			});
+			if(command === 'play') {
+				console.log('[play] staring...');
 
-			try {
-				await entersState(connection, VoiceConnectionStatus.Ready, 10000);
-			} catch (error) {
-				connection.destroy();
-				throw error;
-			}
+				// const url = args[0].replace('<', '').replace('>', '');
+				const url = 'https://www.youtube.com/watch?v=3hW1rMNC89o';
 
-			const player = createAudioPlayer({
-				behaviors: {
-					noSubscriber: NoSubscriberBehavior.Play,
-					maxMissedFrames: Math.round(5000 / 20),
+				const channel = member.voice.channel;
+				if(!channel) {
+					message.reply('You are not in a voice channel');
+					return;
 				}
-			});
 
-			connection.subscribe(player);
+				const connection = joinVoiceChannel({
+					guildId: guild.id,
+					channelId: channel.id,
+					adapterCreator: guild.voiceAdapterCreator
+				});
 
-			// const stream = new PassThrough();
+				try {
+					await entersState(connection, VoiceConnectionStatus.Ready, 10000);
+				} catch (error) {
+					connection.destroy();
+					throw error;
+				}
 
-			// let youtubeProcess;
-			let ffmpegProcess;
-			// for(let i = 0; i < 60; i++) {
-				const streams = (await execAsync(`yt-dlp ${encodeURI(url)} --cookies ${Path.resolve('cookies.txt')} --get-url`)).stdout.toString().split('\n');
-				const streamUrl = streams[0].endsWith('.m3u8') ? streams[0] : streams[1];
+				const player = createAudioPlayer({
+					behaviors: {
+						noSubscriber: NoSubscriberBehavior.Play,
+						maxMissedFrames: Math.round(5000 / 20),
+					}
+				});
 
-				ffmpegProcess = spawn('ffmpeg', [
+				connection.subscribe(player);
+
+				// for(let i = 0; i < 60; i++) {
+				const streams = (await execAsync(`yt-dlp ${encodeURI(url)} --cookies ${Path.resolve('cookies.txt')} --get-url --format 251/91`)).stdout.toString().split('\n');
+				// const streamUrl = streams[0].endsWith('.m3u8') ? streams[0] : streams[1];
+				const streamUrl = streams[0];
+
+				const ffmpegProcess = spawn('ffmpeg', [
 					'-hide_banner',
 					'-i', streamUrl,
 					'-loglevel', 'quiet',
@@ -106,49 +141,42 @@ function execAsync(command) {
 					stdio: 'pipe'
 				});
 
+
 				ffmpegProcess.stderr.on('data', (chunk) => {
 					console.log(chunk.toString());
 				});
 
-				// ffmpegProcess.stdout.on('data', (chunk) => {
-				// 	const buffer = Buffer.from(chunk);
+				ffmpegProcess.stdout.on('data', (chunk) => {
+					firstInput.write(chunk);
 
-				// 	// console.log(chunk.toString());
-				// 	stream.write(buffer);
-				// 	// console.log(`[ffmpeg -> discord.js] Written ${buffer.byteLength} bytes`);
-				// });
+					// console.log(`[ffmpeg -> mix] Written ${buffer.byteLength} bytes`);
+				});
 
-				// ffmpegProcess.stdout.on('data', (chunk) => {
-
-				// });
+				masterMix.on('data', (chunk) => {
+					const buffer = Buffer.from(chunk);
+					
+					console.log(`[master mix] Read ${buffer.byteLength} bytes, volume: ${firstInput.volume}%, ${secondInput.volume}%`);
+				});
 
 				// youtubeProcess.on('exit', (code) => {
 				// 	console.log(`[youtube-dl] Exited with exit code ${code}`)
 				// });
 
 				ffmpegProcess.on('exit', (code) => {
-					console.log(`[ffmpeg] Exited with exit code ${code}`)
+					console.log(`[ffmpeg] Exited with exit code ${code}`);
 				});
+				
+				player.on('error', console.error);
+				player.on('debug', console.log);
 
-				// youtubeProcess.stderr.on('data', (chunk) => {
-				// 	console.log(chunk.toString());
-				// });
-			// }
+				const resource = createAudioResource(masterMix, { inputType: StreamType.Raw });
+				player.play(resource);
 
-			// Pipe youtube-dl to ffmpeg
-			// youtubeProcess.stdout.on('data', (chunk) => {
-			// 	const buffer = Buffer.from(chunk);
-
-			// 	// console.log(chunk.toString());
-			// 	ffmpegProcess.stdin.write(buffer);
-			// 	// console.log(`[youtube-dl -> ffmpeg] Written ${buffer.byteLength} bytes`);
-			// });
-
-			player.on('error', console.error);
-			player.on('debug', console.log);
-
-			const resource = createAudioResource(ffmpegProcess.stdout, { inputType: StreamType.Raw });
-			player.play(resource);
+				// message.reply('Музло включено');
+			}
+		} catch(error) {
+			console.error(error);
+			message.reply(`Pizda: ${error.name}: ${error.message}`);
 		}
 	});
 
