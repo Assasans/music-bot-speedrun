@@ -91,8 +91,8 @@ function execAsync(command) {
 			if(command === 'play') {
 				console.log('[play] staring...');
 
-				// const url = args[0].replace('<', '').replace('>', '');
-				const url = 'https://www.youtube.com/watch?v=3hW1rMNC89o';
+				const url = args[0].replace('<', '').replace('>', '');
+				// const url = 'https://www.youtube.com/watch?v=3hW1rMNC89o';
 
 				const channel = member.voice.channel;
 				if(!channel) {
